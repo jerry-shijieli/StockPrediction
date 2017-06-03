@@ -1,0 +1,165 @@
+---
+title: "Stock Prediction - Data Exploration"
+author: Jerry
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#  Stock Forecasting by Building ARIMA model
+
+Load stock price data and necessary packages to build ARIMA model for time series analysis and forecasting.
+
+## Load stcock data and visualize for summary
+
+```{r data, echo=FALSE, message=FALSE}
+library(quantmod)
+library(tseries)
+library(timeSeries)
+library(forecast)
+library(xts)
+library(readr)
+library(ggplot2)
+
+raw_data <- read_csv('../data/IBEX35.csv', col_names=TRUE)
+tsprice <- xts(x=raw_data$Close, order.by = as.Date(raw_data$Date,"%m/%d/%y"), frequency = 255)
+summary(tsprice)
+
+plot(tsprice, type='l', main='Close price of stock', xlab='Date', ylab='Close Price')
+
+gghistogram(tsprice, add.normal = TRUE, add.kde = TRUE, add.rug = TRUE)
+```
+
+
+## Compute and plot logarithmic returns of this stock
+
+We use ARIMA to forecast the log returns not the stock price.
+
+$$log\_return = \log(\frac{Price_{current}}{Price_{yesterday}})$$
+
+```{r log return, echo=FALSE, message=FALSE}
+stock_log_return = diff(log(tsprice), lag=1)
+stock_log_return = stock_log_return[!is.na(stock_log_return)]
+
+plot(stock_log_return, type='l', main='log returns')
+```
+## ADF test to check stationarity of return series
+
+If the p-value of ADF (Augmented Dickey-Fuller) test smaller than 0.05, then the return series is stationary. Otherwise, we would have first differenced the returns series to make it stationary.
+```{r ADF test, echo=FALSE, message=FALSE}
+print(adf.test(stock_log_return))
+```
+The p-value show that the log return series is stationary.
+
+## Split data set into training and testing parts
+
+```{r data split, echo=FALSE, message=FALSE}
+stock_lr_train = stock_log_return[index(stock_log_return)<as.Date("2015-01-01")]
+stock_lr_test = stock_log_return[index(stock_log_return)>=as.Date("2015-01-01")]
+
+opar <- par()
+plot(stock_log_return, main='data split', type='l')
+lines(stock_lr_train, col='red', type='l')
+lines(stock_lr_test, col='blue', type='l')
+par(opar)
+
+gghistogram(stock_lr_train, add.normal = TRUE, add.kde = TRUE)
+gghistogram(stock_lr_test, add.normal = TRUE, add.kde = TRUE)
+```
+
+## Apply ACF and PACF
+
+Call autocorrelation function on the training data series.
+
+```{r ACF, echo=FALSE, message=FALSE}
+par(mfrow=c(1,1))
+acf.stock = acf(stock_lr_train, main='ACF Plot', lag.max = 100)
+pacf.stock = pacf(stock_lr_train, main='PACF Plot', lag.max = 100)
+
+print("Significant spikes in ACF:") 
+print(which(abs(acf.stock$acf)>0.05)-1)
+print("Significant spikes in PACF:") 
+print(which(abs(pacf.stock$acf)>0.05))
+```
+
+According to the PACF plot, we select AR order=3, and from the ACF plot, we select MA order=3.
+
+## Use ARIMA to forecast log returns by online learning
+
+Using the parameter setting derived from PACF and ACF, we build an ARIMA model and forecast the log return of the next day in testing set. In the online learning mode, we update the training data set by throwing the first observation and add last observation by the new confirmed current observation (today's log return).
+
+```{r ARIMA forecasting, echo=FALSE, message=FALSE}
+# initializing an xts object for Actual log returns 
+actual_series = xts(0, as.Date("2015-1-1", "%Y-%m-%d"))
+
+# initializing a dataframe for the forecasted return series
+forecasted_series = data.frame(Forecasted=numeric())
+
+start = nrow(stock_lr_train)
+for (d in start:(nrow(stock_log_return)-1)){
+  stock_lr_train = stock_log_return[1:d,]
+  stock_lr_test = stock_log_return[(d+1):nrow(stock_log_return),]
+  
+  # summary of ARIMA model using the determined (p,d,q) parameters
+  fit = arima(stock_lr_train, order=c(2,0,2), include.mean = FALSE)
+  summary(fit)
+  
+  # plot acf of the residuals
+  acf(fit$residuals, main="Residuals plot")
+  
+  # forecasting the log returns
+  arima.forecast = forecast.Arima(fit, h=1, level=99)
+  summary(arima.forecast)
+  
+  # plot the forecast
+  par(mfrow=c(1,1))
+  plot(arima.forecast, main="ARIMA Forecast")
+  
+  # creating a series of forecasted returns for the forecasted period
+  forecasted_series = rbind(forecasted_series, arima.forecast$mean[1])
+  colnames(forecasted_series) = c("Forecasted")
+  
+  # creating a series of actual returns for the forecasted period
+  actual_return = stock_log_return[(d+1),]
+  actual_series = c(actual_series, xts(actual_return))
+  rm(actual_return)
+  
+  print(tsprice[(d+1),])
+  print(tsprice[(d+2),])
+}
+```
+
+
+## Evaluate ARIMA model by forecasting accuracy
+
+```{r ARIMA evaluation, echo=FALSE, message=FALSE}
+# adjust the length of the actual return series
+actual_series = actual_series[-1]
+
+# create a time sereis object of the forecasted sereis 
+forecasted_series = xts(forecasted_series, index(actual_series))
+
+# create a plot of the two return series - actual vs forecasted
+plot(actual_series, type='l', main='Actural Returns vs Forecasted Returns')
+lines(forecasted_series, lwd=1.5, col='red')
+legend('bottomright', c('Actual','Forecasted'), lty=c(1,1), lwd=c(1.5,1.5), col=c('black', 'red'))
+
+# create a table for the accuracy of the forecast
+comparison = merge(actual_series, forecasted_series)
+comparison$Accuracy = sign(comparison$actual_series)==sign(comparison$Forecasted)
+print(comparison)
+
+# compute the accuracy percentage metric
+Accuracy_percentage = sum(comparison$Accuracy==1)*100/length(comparison$Accuracy)
+print('Accuracy')
+print(Accuracy_percentage)
+
+# compute rmse
+residual_series <- actual_series - forecasted_series
+rmse <- sqrt(sum(apply(residual_series, 1, function(x){x^2}))/nrow(residual_series))
+print('RMSE')
+print(rmse)
+```
+
