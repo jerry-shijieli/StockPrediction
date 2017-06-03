@@ -55,7 +55,7 @@ The p-value show that the log return series is stationary.
 
 ## Split data set into training and testing parts
 
-```{r data split, echo=FALSE, message=FALSE}
+```{r data split, echo=FALSE, message=FALSE, warning=FALSE}
 stock_lr_train = stock_log_return[index(stock_log_return)<as.Date("2015-01-01")]
 stock_lr_test = stock_log_return[index(stock_log_return)>=as.Date("2015-01-01")]
 
@@ -84,7 +84,7 @@ print("Significant spikes in PACF:")
 print(which(abs(pacf.stock$acf)>0.05))
 ```
 
-According to the PACF plot, we select AR order=3, and from the ACF plot, we select MA order=3.
+According to the PACF plot, we select AR order=2.
 
 ## Use ARIMA to forecast log returns by online learning
 
@@ -104,18 +104,18 @@ for (d in start:(nrow(stock_log_return)-1)){
   
   # summary of ARIMA model using the determined (p,d,q) parameters
   fit = arima(stock_lr_train, order=c(2,0,2), include.mean = FALSE)
-  summary(fit)
+  # summary(fit)
   
   # plot acf of the residuals
-  acf(fit$residuals, main="Residuals plot")
+  # acf(fit$residuals, main="Residuals plot")
   
   # forecasting the log returns
   arima.forecast = forecast.Arima(fit, h=1, level=99)
-  summary(arima.forecast)
+  # summary(arima.forecast)
   
   # plot the forecast
-  par(mfrow=c(1,1))
-  plot(arima.forecast, main="ARIMA Forecast")
+  # par(mfrow=c(1,1))
+  # plot(arima.forecast, main="ARIMA Forecast")
   
   # creating a series of forecasted returns for the forecasted period
   forecasted_series = rbind(forecasted_series, arima.forecast$mean[1])
@@ -126,9 +126,12 @@ for (d in start:(nrow(stock_log_return)-1)){
   actual_series = c(actual_series, xts(actual_return))
   rm(actual_return)
   
-  print(tsprice[(d+1),])
-  print(tsprice[(d+2),])
+  # print(tsprice[(d+1),])
+  # print(tsprice[(d+2),])
 }
+
+summary(fit)
+summary(arima.forecast)
 ```
 
 
