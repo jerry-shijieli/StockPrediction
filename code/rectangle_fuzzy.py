@@ -27,10 +27,18 @@ def set_fuzzy_numbers(u_discourse_raw):
 
 def membership_assignment(value_time_series, fuzzy_numbers):
     membership_list = np.digitize(value_time_series, fuzzy_numbers)-1
+    membership_list[membership_list<0] = 0
+    max_index = len(fuzzy_numbers) - 2
+    membership_list[membership_list>max_index] = max_index
     return membership_list.tolist()
 
 def get_membership(value, fuzzy_numbers):
     membership_index = np.digitize([value], fuzzy_numbers)[0]-1
+    if membership_index < 0:
+    	membership_index = 0
+    max_index = len(fuzzy_numbers) - 2
+    if membership_index > max_index:
+    	membership_index = max_index
     return membership_index
 
 def FLR(membership_time_series): # transition between consecutive observations
